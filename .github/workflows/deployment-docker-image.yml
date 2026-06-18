@@ -150,45 +150,7 @@ jobs:
           outputs: type=image,"name=${{ env.GHCR_REPO }}",push-by-digest=true,name-canonical=true,push=true
         env:
           SKIP_ENV_VALIDATION: true
-  build-arm64:
-    name: Build docker image for arm64
-    needs: release
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 20
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          ref: ${{ needs.release.outputs.git_ref }}
-
-      - name: Docker meta
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: "${{ env.GHCR_REPO }}"
-
-      - name: Log in to the Container registry
-        uses: docker/login-action@v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
-
-      - name: Build and push by digest
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          network: host
-          platforms: linux/arm64
-          labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,"name=${{ env.GHCR_REPO }}",push-by-digest=true,name-canonical=true,push=true
-        env:
-          SKIP_ENV_VALIDATION: true
+  
   extract-asset-amd64:
     name: Extract amd64 asset from docker image
     needs: [release, build-amd64]
@@ -205,24 +167,9 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           repository: ${{ github.repository }}
 
-  extract-asset-arm64:
-    name: Extract arm64 asset from docker image
-    needs: [release, build-arm64]
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 5
-    steps:
-      - name: Extract arm64
-        if: needs.release.outputs.skipped == 'false'
-        uses: homarr-labs/homarr/.github/actions/extract-build-artifact@dev
-        with:
-          digest: "${{ env.GHCR_REPO }}@${{ needs.build-arm64.outputs.digest }}"
-          architecture: arm64
-          release-tag: ${{ needs.release.outputs.version }}
-          token: ${{ secrets.GITHUB_TOKEN }}
-          repository: ${{ github.repository }}
   publish:
     name: Complete deployment and notify
-    needs: [release, build-amd64, build-arm64, extract-asset-amd64, extract-asset-arm64]
+    needs: [release, build-amd64, extract-asset-amd64]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     env:
@@ -250,21 +197,18 @@ jobs:
         if: env.DEPLOY_BETA == 'true'
         run: |
           docker buildx imagetools create -t ${{ env.GHCR_REPO }}:beta \
-            ${{ env.GHCR_REPO }}@${{ needs.build-amd64.outputs.digest }} \
-            ${{ env.GHCR_REPO }}@${{ needs.build-arm64.outputs.digest }}
+            ${{ env.GHCR_REPO }}@${{ needs.build-amd64.outputs.digest }}
 
       - name: Publish latest
         if: env.DEPLOY_LATEST == 'true'
         run: |
           docker buildx imagetools create -t ${{ env.GHCR_REPO }}:latest \
-            ${{ env.GHCR_REPO }}@${{ needs.build-amd64.outputs.digest }} \
-            ${{ env.GHCR_REPO }}@${{ needs.build-arm64.outputs.digest }}
+            ${{ env.GHCR_REPO }}@${{ needs.build-amd64.outputs.digest }}
 
       - name: Publish version
         run: |
           docker buildx imagetools create -t ${{ env.GHCR_REPO }}:${{ env.NEXT_VERSION }} \
-            ${{ env.GHCR_REPO }}@${{ needs.build-amd64.outputs.digest }} \
-            ${{ env.GHCR_REPO }}@${{ needs.build-arm64.outputs.digest }}
+            ${{ env.GHCR_REPO }}@${{ needs.build-amd64.outputs.digest }} 
 
       - name: Publish release
         if: needs.release.outputs.skipped == 'false'
